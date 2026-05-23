@@ -48,8 +48,8 @@ jobs:
 
       - name: Build and push image
         env:
-          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}.azurecr.io
-          IMAGE: ${{ vars.ACR_LOGIN_SERVER }}.azurecr.io/${{ vars.IMAGE_NAME }}
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+          IMAGE: ${{ vars.ACR_LOGIN_SERVER }}/${{ vars.IMAGE_NAME }}
         run: |
           docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
           docker push "$IMAGE:$IMAGE_TAG"
@@ -60,4 +60,4 @@ jobs:
           az containerapp update \
             --name "${{ vars.CONTAINER_APP_NAME }}" \
             --resource-group "${{ vars.RESOURCE_GROUP }}" \
-            --image "${{ vars.ACR_NAME }}.azurecr.io/${{ vars.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
+            --image "${{ vars.ACR_LOGIN_SERVER }}/${{ vars.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
