@@ -1,16 +1,19 @@
 # Build on push to main, push image to ACR, deploy to Azure Container Apps.
 #
-# GitHub secrets:
-#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+# GitHub secrets (Settings → Secrets and variables → Actions):
+#   AZURE_CLIENT_ID       – App registration / federated identity client ID
+#   AZURE_TENANT_ID       – Azure AD tenant ID
+#   AZURE_SUBSCRIPTION_ID – Azure subscription ID
 #
-# Repository variables:
-#   ACR_LOGIN_SERVER              – e.g. tnmonitor-bcdwa6ctajefhpfb.azurecr.io
-#   IMAGE_NAME                    – e.g. tn-economy-monitor
-#   CONTAINER_APP_NAME, RESOURCE_GROUP
-#   CONTAINER_APP_CONTAINER_NAME  – e.g. simple-hello-world-container (from portal template)
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   ACR_NAME              – Container registry name (e.g. myregistry, not the FQDN)
+#   IMAGE_NAME            – Image repository name (e.g. tamil-nadu-economic-monitor)
+#   CONTAINER_APP_NAME    – Container App resource name
+#   RESOURCE_GROUP        – Resource group containing the Container App and ACR
 #
-# GitHub identity needs AcrPush on ACR and permission to assign AcrPull to the
-# Container App managed identity (Owner or User Access Administrator on the RG).
+# Azure setup: federated credential on the app registration for
+#   repo:<owner>/<repo>:ref:refs/heads/main
+# Roles on the identity: AcrPush (ACR), Contributor (resource group or Container App).
 
 name: Deploy to Azure Container Apps
 
@@ -25,9 +28,6 @@ permissions:
 
 env:
   IMAGE_TAG: ${{ github.sha }}
-  ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
-  ACR_NAME: ${{ vars.ACR_NAME }}
-  IMAGE: ${{ vars.ACR_LOGIN_SERVER }}/${{ vars.IMAGE_NAME }}
 
 jobs:
   build_and_deploy:
@@ -44,69 +44,20 @@ jobs:
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log in to Azure Container Registry
-        run: |
-          ACR_NAME="${{ vars.ACR_NAME }}"
-          az acr login --name "$ACR_NAME"
+        run: az acr login --name ${{ vars.ACR_NAME }}
 
       - name: Build and push image
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}.azurecr.io
+          IMAGE: ${{ vars.ACR_LOGIN_SERVER }}.azurecr.io/${{ vars.IMAGE_NAME }}
         run: |
           docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
           docker push "$IMAGE:$IMAGE_TAG"
           docker push "$IMAGE:latest"
 
-      # Container Apps must authenticate to ACR to pull private images.
-      - name: Grant Container App access to ACR
-        env:
-          APP: ${{ vars.CONTAINER_APP_NAME }}
-          RG: ${{ vars.RESOURCE_GROUP }}
-        run: |
-          set -euo pipefail
-          ACR_NAME="${{ vars.ACR_NAME }}"
-          ACR_ID=$(az acr show --name "$ACR_NAME" --query id -o tsv)
-
-          PRINCIPAL_ID=$(az containerapp identity show \
-            --name "$APP" \
-            --resource-group "$RG" \
-            --query principalId -o tsv 2>/dev/null || true)
-
-          if [ -z "$PRINCIPAL_ID" ] || [ "$PRINCIPAL_ID" = "null" ]; then
-            az containerapp identity assign \
-              --name "$APP" \
-              --resource-group "$RG" \
-              --system-assigned
-            PRINCIPAL_ID=$(az containerapp identity show \
-              --name "$APP" \
-              --resource-group "$RG" \
-              --query principalId -o tsv)
-          fi
-
-          az role assignment create \
-            --assignee-object-id "$PRINCIPAL_ID" \
-            --assignee-principal-type ServicePrincipal \
-            --role AcrPull \
-            --scope "$ACR_ID" \
-            2>/dev/null || true
-
-          az containerapp registry set \
-            --name "$APP" \
-            --resource-group "$RG" \
-            --server "$ACR_LOGIN_SERVER" \
-            --identity system
-
       - name: Deploy to Container App
-        env:
-          APP: ${{ vars.CONTAINER_APP_NAME }}
-          RG: ${{ vars.RESOURCE_GROUP }}
-          CONTAINER_NAME: ${{ vars.CONTAINER_APP_CONTAINER_NAME }}
         run: |
-          set -euo pipefail
-          ARGS=(
-            containerapp update
-            --name "$APP"
-            --resource-group "$RG"
-            --image "$IMAGE:$IMAGE_TAG"
-          )
-          if [ -n "${CONTAINER_NAME:-}" ]; then
-            ARGS+=(--container-name "$CONTAINER_NAME")
-          fi
-          az "${ARGS[@]}"
+          az containerapp update \
+            --name "${{ vars.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --image "${{ vars.ACR_NAME }}.azurecr.io/${{ vars.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
