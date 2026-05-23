@@ -4,9 +4,13 @@
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
 #
 # Repository variables:
-#   ACR_LOGIN_SERVER     – Full registry host (e.g. tnmonitor-bcdwa6ctajefhpfb.azurecr.io)
-#   IMAGE_NAME           – Image repository name (e.g. tamil-nadu-economic-monitor)
+#   ACR_LOGIN_SERVER              – e.g. tnmonitor-bcdwa6ctajefhpfb.azurecr.io
+#   IMAGE_NAME                    – e.g. tn-economy-monitor
 #   CONTAINER_APP_NAME, RESOURCE_GROUP
+#   CONTAINER_APP_CONTAINER_NAME  – e.g. simple-hello-world-container (from portal template)
+#
+# GitHub identity needs AcrPush on ACR and permission to assign AcrPull to the
+# Container App managed identity (Owner or User Access Administrator on the RG).
 
 name: Deploy to Azure Container Apps
 
@@ -40,7 +44,7 @@ jobs:
 
       - name: Log in to Azure Container Registry
         run: |
-          ACR_NAME="${{ vars.ACR_NAME }}"
+          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
           az acr login --name "$ACR_NAME"
 
       - name: Build and push image
@@ -49,9 +53,59 @@ jobs:
           docker push "$IMAGE:$IMAGE_TAG"
           docker push "$IMAGE:latest"
 
-      - name: Deploy to Container App
+      # Container Apps must authenticate to ACR to pull private images.
+      - name: Grant Container App access to ACR
+        env:
+          APP: ${{ vars.CONTAINER_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
         run: |
-          az containerapp update \
-            --name "${{ vars.CONTAINER_APP_NAME }}" \
-            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+          set -euo pipefail
+          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+          ACR_ID=$(az acr show --name "$ACR_NAME" --query id -o tsv)
+
+          PRINCIPAL_ID=$(az containerapp identity show \
+            --name "$APP" \
+            --resource-group "$RG" \
+            --query principalId -o tsv 2>/dev/null || true)
+
+          if [ -z "$PRINCIPAL_ID" ] || [ "$PRINCIPAL_ID" = "null" ]; then
+            az containerapp identity assign \
+              --name "$APP" \
+              --resource-group "$RG" \
+              --system-assigned
+            PRINCIPAL_ID=$(az containerapp identity show \
+              --name "$APP" \
+              --resource-group "$RG" \
+              --query principalId -o tsv)
+          fi
+
+          az role assignment create \
+            --assignee-object-id "$PRINCIPAL_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role AcrPull \
+            --scope "$ACR_ID" \
+            2>/dev/null || true
+
+          az containerapp registry set \
+            --name "$APP" \
+            --resource-group "$RG" \
+            --server "$ACR_LOGIN_SERVER" \
+            --identity system
+
+      - name: Deploy to Container App
+        env:
+          APP: ${{ vars.CONTAINER_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          CONTAINER_NAME: ${{ vars.CONTAINER_APP_CONTAINER_NAME }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            containerapp update
+            --name "$APP"
+            --resource-group "$RG"
             --image "$IMAGE:$IMAGE_TAG"
+          )
+          if [ -n "${CONTAINER_NAME:-}" ]; then
+            ARGS+=(--container-name "$CONTAINER_NAME")
+          fi
+          az "${ARGS[@]}"
