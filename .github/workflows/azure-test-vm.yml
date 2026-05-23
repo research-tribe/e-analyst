@@ -1,42 +1,63 @@
-name: Deploy to Ubuntu VM
+# Build on push to main, push image to ACR, deploy to Azure Container Apps.
+#
+# GitHub secrets (Settings → Secrets and variables → Actions):
+#   AZURE_CLIENT_ID       – App registration / federated identity client ID
+#   AZURE_TENANT_ID       – Azure AD tenant ID
+#   AZURE_SUBSCRIPTION_ID – Azure subscription ID
+#
+# Repository variables (Settings → Secrets and variables → Actions → Variables):
+#   ACR_NAME              – Container registry name (e.g. myregistry, not the FQDN)
+#   IMAGE_NAME            – Image repository name (e.g. tamil-nadu-economic-monitor)
+#   CONTAINER_APP_NAME    – Container App resource name
+#   RESOURCE_GROUP        – Resource group containing the Container App and ACR
+#
+# Azure setup: federated credential on the app registration for
+#   repo:<owner>/<repo>:ref:refs/heads/main
+# Roles on the identity: AcrPush (ACR), Contributor (resource group or Container App).
+
+name: Deploy to Azure Container Apps
 
 on:
   push:
     branches:
       - main
 
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  IMAGE_TAG: ${{ github.sha }}
+
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Azure login
+        uses: azure/login@v2
         with:
-          node-version: '20'
-          cache: 'npm'
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Install and build
+      - name: Log in to Azure Container Registry
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Build and push image
+        env:
+          ACR_LOGIN_SERVER: ${{ vars.ACR_NAME }}.azurecr.io
+          IMAGE: ${{ vars.ACR_NAME }}.azurecr.io/${{ vars.IMAGE_NAME }}
         run: |
-          npm ci
-          npm run build
+          docker build -t "$IMAGE:$IMAGE_TAG" -t "$IMAGE:latest" .
+          docker push "$IMAGE:$IMAGE_TAG"
+          docker push "$IMAGE:latest"
 
-      - name: Deploy to VM via SSH
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ vars.AZURE_TEST_VM_HOST }}
-          username: ${{ vars.AZURE_TEST_VM_USERNAME }}
-          key: ${{ secrets.AZURE_TEST_VM_KEY }}
-          port: ${{ secrets.AZURE_TEST_VM_PORT || 22 }}
-          source: "dist/*"
-          target: "/var/www/tamil-nadu-economic-monitor"
-          strip_components: 1
-
-      - name: Reload nginx (optional)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ vars.AZURE_TEST_VM_HOST }}
-          username: ${{ vars.AZURE_TEST_VM_USERNAME }}
-          key: ${{ secrets.AZURE_TEST_VM_KEY }}
-          port: ${{ secrets.AZURE_TEST_VM_PORT || 22 }}
-          script: sudo systemctl reload nginx
+      - name: Deploy to Container App
+        run: |
+          az containerapp update \
+            --name "${{ vars.CONTAINER_APP_NAME }}" \
+            --resource-group "${{ vars.RESOURCE_GROUP }}" \
+            --image "${{ vars.ACR_NAME }}.azurecr.io/${{ vars.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
