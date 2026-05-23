@@ -26,6 +26,7 @@ permissions:
 env:
   IMAGE_TAG: ${{ github.sha }}
   ACR_LOGIN_SERVER: ${{ vars.ACR_LOGIN_SERVER }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
   IMAGE: ${{ vars.ACR_LOGIN_SERVER }}/${{ vars.IMAGE_NAME }}
 
 jobs:
@@ -44,7 +45,7 @@ jobs:
 
       - name: Log in to Azure Container Registry
         run: |
-          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+          ACR_NAME="${{ vars.ACR_NAME }}"
           az acr login --name "$ACR_NAME"
 
       - name: Build and push image
@@ -60,7 +61,7 @@ jobs:
           RG: ${{ vars.RESOURCE_GROUP }}
         run: |
           set -euo pipefail
-          ACR_NAME="${ACR_LOGIN_SERVER%%.azurecr.io}"
+          ACR_NAME="${{ vars.ACR_NAME }}"
           ACR_ID=$(az acr show --name "$ACR_NAME" --query id -o tsv)
 
           PRINCIPAL_ID=$(az containerapp identity show \
