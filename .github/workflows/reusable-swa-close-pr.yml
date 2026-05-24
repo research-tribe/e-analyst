@@ -1,0 +1,19 @@
+name: Reusable SWA Close PR
+
+on:
+  workflow_call:
+    secrets:
+      azure_static_web_apps_api_token:
+        required: true
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    name: Close Pull Request
+    steps:
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.azure_static_web_apps_api_token }}
+          action: close
