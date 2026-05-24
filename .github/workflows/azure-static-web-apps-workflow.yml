@@ -12,28 +12,32 @@ on:
 jobs:
   build_and_deploy_job:
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    env: &swa_common_env
+      SWA_TOKEN: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_FLOWER_0F719A510 }}
     runs-on: ubuntu-latest
     name: Build and Deploy Job
     steps:
       - uses: actions/checkout@v4
-        with:
+        with: &checkout_with_submodules
           submodules: true
           lfs: false
 
       - uses: ./.github/actions/swa-deploy
-        with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_FLOWER_0F719A510 }}
+        with: &swa_deploy_with
+          azure_static_web_apps_api_token: ${{ env.SWA_TOKEN }}
           app_location: "/"
           api_location: ""
           output_location: "dist"
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    env: *swa_common_env
     runs-on: ubuntu-latest
     name: Close Pull Request Job
     steps:
       - uses: actions/checkout@v4
+        with: *checkout_with_submodules
 
       - uses: ./.github/actions/swa-close-pr
         with:
-          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROUD_FLOWER_0F719A510 }}
+          azure_static_web_apps_api_token: ${{ env.SWA_TOKEN }}
