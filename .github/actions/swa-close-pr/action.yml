@@ -1,0 +1,16 @@
+name: SWA Close PR
+description: Close Azure Static Web Apps PR preview environment
+
+inputs:
+  azure_static_web_apps_api_token:
+    description: Azure SWA deployment token
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Close Pull Request
+      uses: Azure/static-web-apps-deploy@v1
+      with:
+        azure_static_web_apps_api_token: ${{ inputs.azure_static_web_apps_api_token }}
+        action: close
