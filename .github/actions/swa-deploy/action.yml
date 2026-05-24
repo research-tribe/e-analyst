@@ -1,5 +1,5 @@
 name: SWA Deploy
-description: Checkout, build, and deploy to Azure Static Web Apps
+description: Build and deploy to Azure Static Web Apps
 
 inputs:
   azure_static_web_apps_api_token:
@@ -21,11 +21,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: true
-        lfs: false
-
     - name: Build And Deploy
       uses: Azure/static-web-apps-deploy@v1
       with:
